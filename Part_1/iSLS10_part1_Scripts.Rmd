@@ -1,0 +1,346 @@
+---
+title: "Lipidomics Data Analysis"
+subtitle: "iSLS9 Workshop 2021"
+author: "Bo Burla and Hyungwon Choi"
+date: '2021-02-26'
+output:
+  html_document:
+    keep_md: no
+    df_print: paged
+  html_notebook: default
+  slidy_presentation: default
+  ioslides_presentation: default
+  word_document: default
+bibliography: references.bib
+---
+
+# Part 1
+
+## Prerequisites
+
+We will be using tidyverse packages for this part. The `tidyverse` package installs/loads following packages: `ggplot2`, `dplyr`, `tidyr`, `readr`, `purrr`, `tibble`, `stringr`, `foracts`. We will also be using `broom` for one module.
+
+## Setup
+
+```{r setup}
+library(here)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+library(forcats)
+library(ggplot2)
+library(ggrepel)
+```
+
+## The Lipidomics Dataset
+
+The data used in this workshop is from [Chew *et al*, *JCI Insight,* 2019](https://doi.org/10.1172/jci.insight.126925) The lipdodmics LC-MS raw data used in this publication was reprocessed using MRMkit [Teo *et al*, *Analytical Chemistry*, 2020](https://doi.org/10.1021/acs.analchem.0c03060) [@chew2019; @Teo2020]
+
+## Import and formatting the lipidomics dataset
+
+Read the CSV file and view it. The output is a tibble, which is a data.frame with some additional functions.
+
+```{r readcsv}
+d_orig <- readr::read_csv(here("Part_1/data/quant_table_with_QC.csv"), 
+                          col_names = TRUE, trim_ws = TRUE)
+d_orig
+```
+
+We see that the lipid names (column headers) contain details about the measured transition (-H2O). Let us clean the lipid names by removing this info[^1]. We also want to remove the file extension .mzML from the file names in filename. Finally, we wish to change the name of the column `SampleType` to `SampleType` and convert it to a \<factor\>.
+
+[^1]: The function `fixed` inside of `str_replace` is needed when we search for text containing special characters, such as ()\*[]- `str_replace` used by default [regular expressions](https://stringr.tidyverse.org/articles/regular-expressions.html) (regex). `fixed` tells R to search for a fixed pattern, not a regex pattern
+
+```{r datacleanup1}
+
+d_cleaning1 <- d_orig %>%
+  rename_with( ~ str_replace(.x, fixed("(-H20)"), "")) %>%
+  rename(SampleType = type) %>%
+  mutate(
+    filename = str_replace(filename, fixed(".mzML"), ""),
+    SampleType = as_factor(SampleType)
+  )
+d_cleaning1
+```
+
+We see also that the first 6 rows contain retention times, m/z values and QC info, which we do not need for now. Let us remove these rows:
+
+```{r removeannot}
+d_cleaning2 <- d_cleaning1 %>% slice(-1:-6)
+d_cleaning2
+```
+
+We now want to retreive the `SampleID`which we later need to associate the data with metadata. The `SampleID` that is available in the column `filename` and which has following structure for samples: `SampleID#analysis_no` . We extract the SampleID using [regular expressions](https://stringr.tidyverse.org/articles/regular-expressions.html) (regex). We assume that the original order of the data corresponds to the analysis run order. We add field `run_id` indicating the analysis run order. Finally, we re-order the columns, i.e. moving `SampleID` and `run_id` to the front.
+
+```{r datacleanup2}
+
+d_cleaning3 <- d_cleaning2 %>% 
+  mutate(
+    SampleID = str_extract(filename, ".+(?=\\#)"),
+    run_id = row_number()
+  )
+
+d_wide <- d_cleaning3 %>% 
+  dplyr::select(run_id, filename, SampleType, SampleID, everything())
+
+d_wide
+```
+
+## Quality control of the dataset
+
+This dataset contains data from 2 sample types of QC samples:
+
+-   BQCs (Batch QC, pooled plasma co-extracted and measured with samples)
+-   TQCs (technical QC, pooled extract measured in regular intervals).
+
+To gain an idea about the analytical quality of this dataset, we calculate the %CV (coefficient of variation) for each lipid species for all 3 sample types (TQC, BQC, Study Samples). For this we first convert the table first into a 'long' format:
+
+```{r reshapelong, max.print=20, paged.print=TRUE}
+# Reshape the table to the long format
+d_long <- d_wide %>% 
+  pivot_longer(names_to = "lipid", values_to = "conc", cols = -run_id:-batch) %>% 
+  arrange(lipid)
+d_long  
+
+```
+
+To calculate the CVs, we first group the data by `lipid` species and `SampleType` (`group_by`) and then calculate the CV for each group.
+
+```{r cvhisto, max.print=20, paged.print=TRUE}
+
+d_cv_long <- d_long %>%
+  group_by(lipid, SampleType) %>% 
+  summarise(CV = sd(conc)/mean(conc) * 100)
+d_cv_long
+```
+
+To make the table easier to read, we re-shap it so that CVs for BQC, TQC split to different columns will make t easier read.
+
+```{r cvwider}
+d_cv_wide <- d_cv_long %>% pivot_wider(names_from = SampleType, values_from = CV) 
+d_cv_wide
+
+#summary(d_cv_wide)
+```
+
+Finally, we plot the obtained CVs as a histogram, comparing analytical (based on BQC) with biological (based on study samples) CV. `{# We only want to comapre the BQC and Samples, so we exclude TQCs} ggplot(d_sum %>% filter(SampleType != "TQC"), aes(x=CV, color=SampleType)) + geom_histogram(fill="white", position="dodge", bins = 40)`
+
+## Plotting run order *vs* concentration
+
+```{r runs, fig.height=3, fig.width=6}
+
+# We select for few ceramides and sphingomyelins, and ignore the TQCs (TQC only show instrument drift and may nor follow the trend of the samples went underwent extraction in batches)
+d_plot <- d_long %>% 
+  filter(lipid %in% c("Cer d18:1/C16:0", "Cer d18:1/C18:0", "Cer d18:1/C24:0","SM d18:1/C16:0", "SM d18:1/C18:0", "SM d18:1/C24:0")) |> 
+  filter(SampleType != "TQC")
+
+# the layer of the sample type points is defined by the order of the levels in the factor, 
+# so lets re-arrange them to move BQC on top and to ensure the scales (color, shapes) are correctly mapped
+
+d_plot$SampleType <- forcats::fct_relevel(d_plot$SampleType, "SAMPLE", "BQC")
+d_plot <- d_plot %>% arrange(SampleType)
+
+# we will use run_id column that was generated at the beginning
+ p <- ggplot(d_plot, aes(x=run_id, y=conc)) + 
+        geom_point(aes(colour = SampleType, fill = SampleType, shape  = SampleType),
+                   size= 1, alpha=0.5, stroke = .3) +
+        scale_shape_manual(na.value = NA, values = c(21, 16)) +
+        scale_fill_manual(na.value = NA, values= c("#ffffff", "#db0202")) +
+        scale_colour_manual(values = c("#838585", "#db0202")) +
+        facet_wrap(~lipid, ncol = 3, nrow = 2, scales="free_y") +
+        aes(ymin=0) +
+        xlab("Injection number") +
+        theme_light(base_size = 8) 
+
+ plot(p)
+ # ggsave(plot = p, 
+ #       filename = here("Part_1/output", "run_scatter_plot.pdf"), 
+ #       units = "mm", 
+ #       width=250, 
+ #       height=180)
+ 
+
+
+```
+
+## Converting lipid species names to the updated LIPID MAPS nomenclature and retrieving lipid annotations
+
+LIPID MAPS has recently updated the lipid species nomenclature to a more comprehensive and standardized system [@liebisch2020]. There is an increasing number of publications adopting this new nomenclature. There is an online service to convert lipid names (<https://apps.lifs.isas.de/goslin/>). The software behind this tool [@Kopczynski2020] is also available in R ([rgoslin](https://github.com/lifs-tools/rgoslin)) and Python ([pygoslin](https://github.com/lifs-tools/pygoslin)).
+
+Before we can convert lipid names in , we need to convert our lipid names into a more standardized format, for example: - MHCer and DCHer (correspond to the glucosylceramide and and lactosylceramide), need to be written as HexCer and Hex2Cer, respectively. Why...? - The C in front of the fatty acid chains need to be removed (e.g. C24:0 in Cer d18:1/C24:0), otherwise `rgoslin` does not recognize the lipid
+
+```{r speciesclean, message=FALSE}
+
+# Clean lipid species names to a more standardized format
+d_long_temp <- d_long %>%  
+  mutate(
+    species_name_original = lipid,
+    species_name = lipid,
+    species_name = str_replace(species_name, fixed("(-H20)"),""),
+    species_name = str_replace(species_name, "\\/C(?=\\d)", "/"),         #use of regular expression to delete the capital C in front of the FA info
+    species_name = str_replace(species_name, fixed("MHCer"), "HexCer"),
+    species_name = str_replace(species_name, fixed("DHCer"), "Hex2Cer"), 
+    species_name = str_replace(species_name, fixed("Sphd"), "Sph d"),
+    .after = lipid)
+  
+d_long_temp
+```
+
+Now let us use `rgoslin` to convert the names. `rgoslin` is only available via github ((<https://github.com/lifs-tools/rgoslin>). On Windows, you will need [rtools](https://cran.r-project.org/bin/windows/Rtools/), or on macOS [XCode](https://apps.apple.com/sg/app/xcode/id497799835?mt=12), to install `rgoslin`.
+
+First we pass the list of lipid names to be converted into `rgoslin`, which will return a table with the normalize names and a lot of other information, such as sum formula, mass, and chain compositions
+
+```{r goslinconvert}
+## Installing rgoslin (see also text)
+#if(!require(devtools)) { install.packages("devtools") }
+#install_github("lifs-tools/rgoslin")
+
+library(rgoslin)
+
+# get new names and a lot more information
+d_goslin <- rgoslin::parseLipidNamesWithGrammar(unique(d_long_temp$species_name), "LipidMaps")
+
+d_goslin
+
+# List species names that could not be parsed by goslin
+setdiff(d_long_temp$species_name, d_goslin$Original.Name)
+
+# Add normalized (converted) lipid names to the dataset
+d_long_final <- d_goslin %>%
+  dplyr::select(Original.Name, Molecular.Species.Name) %>%
+  full_join(d_long_temp, by=c("Original.Name"="species_name")) %>%
+  dplyr::select(run_id, filename, SampleType, SampleID, batch, species_name_original, species_name = Original.Name, lipid_name= Molecular.Species.Name, conc, -lipid )
+
+
+d_long_final
+```
+
+## Import metadata
+
+But now let us a have a look at the metedata describing the samples. We see that for each sample we have age, gender, BMI and various clinical chemistry parameters
+
+```{r readannot}
+# Load table with sample annotations
+d_annot <- readr::read_csv(here("Part_1/data/sample_annotations.csv"), col_names = TRUE, col_types = cols(.default = col_number()), trim_ws = TRUE)
+
+# since we did not define column types during import, we need manually change SampleID from Double (=numeric) to character (string)
+d_annot$SampleID <- as.character(d_annot$SampleID)
+d_annot
+```
+
+## Export data with metadata for MetaboAnalyst
+
+MetaboAnalyst (<https://www.metaboanalyst.ca/>) is a comprehensive and easy-to-use webserve to analyse metabolomics/lipidomics data. We now prepare a data file containing a the lipid concentrations and selected annotations. As an example here, we exporte data from subjects that have not developed T2DM and add gender as annotation
+
+```{r metaboanalystcsv}
+# filter dataset for subjects without T2DM
+
+d_samples_filt <- d_long_final |> 
+  filter(SampleType == "SAMPLE") |> 
+  inner_join(d_annot |> dplyr::select(SampleID, Gender, DM_incidence)) |> 
+  filter(DM_incidence == 0)
+
+# Export data matrix to a MetENP-readable format
+d_METABO <- d_samples_filt %>% 
+  dplyr::select(SampleID, Gender, lipid_name,  conc) %>% 
+  pivot_wider(names_from = "lipid_name",values_from = "conc") %>% 
+  arrange(Gender, SampleID)
+d_METABO
+
+write_csv(d_METABO, file = here("Part_1/output/d_METABO.csv"))
+```
+
+You can now go to [MetaboAnalyst](https://www.metaboanalyst.ca/MetaboAnalyst/upload/StatUploadView.xhtml) and import this data as concentrations and then proceed analyzing your data. You could e.g. try a to generate a volcano plot to identify which lipids have different concentrations between men and females.
+
+![](images/Screenshot%202022-03-05%20235020.png)
+
+## Plot *P* values and FC as a Volcano plot
+
+Well, let us create a volcano plot ourself and look at which lipids are different between male and female. First, we calculate the log2 fold-changes and the P values from t tests. We see quite a few species with an FDR < 0.05
+```{r stats}
+d_stats <- d_samples_filt %>% 
+  group_by(lipid_name, species_name) %>% 
+  summarise(
+    log2FC = log2(mean(conc[Gender == "2"])/mean(conc[Gender == "1"])),
+    p_value = t.test(x = conc[Gender == "1"], 
+                     y = conc[Gender == "2"],
+                     paired = FALSE,
+                     var.equal = FALSE)$p.value)              
+
+# Multiple testing correction (FDR)
+d_stats$FDR <- p.adjust(d_stats$p_value)
+
+d_stats |> filter(FDR < 0.05) |> arrange(log2FC)
+#hist(d_stats$FDR, breaks = 30)
+```
+and now the volcano plot, ending part 1 of this workshop. 
+```{r volcano}
+# Set tresholds for FC and p value 
+FC_MIN <- 1.2
+FDR_MAX <- 0.01
+
+# add columns to the data.frame definin 'significantly different' species
+d_stat_sum <- d_stats %>% 
+
+  mutate(
+    sign = case_when(
+      log2FC > log2(FC_MIN) & FDR < FDR_MAX ~ "Higher in F",
+      log2FC < -log2(FC_MIN) & FDR < FDR_MAX ~ "Lower in F",
+      TRUE ~ "n.s."),
+    label_sign =  ifelse(sign != "n.s.", species_name, "")
+  )
+
+ggplot(data=d_stat_sum, aes(x= log2FC, y= -log10(FDR), color = sign, label = label_sign)) +
+  geom_point() + 
+  geom_text_repel() +
+  scale_color_manual(values=c("red", "blue", "black")) +
+  geom_vline(xintercept=c(0, -log2(FC_MIN), log2(FC_MIN)), 
+             col="black", linetype = "dotted", size = 1) +
+  geom_hline(yintercept=-log10(FDR_MAX), col="red") +
+    theme_bw()
+```
+
+## Plotting *Equivalent Carbon Number (ECN)* vs. *Retention Time*
+
+We first extract the RT and mz values, available in the first rows of the raw data, then we add selected results from rgoslin
+
+```{r speciesclean3, message=FALSE}
+# Get a tibble with the lipid names as rows from the original data. Include also retention times and mz values, see later.
+# Transposing data frames/tibbles need some tweak.. any better solutions?
+d_species <- tibble(species_name_original = names(d_cleaning2[,-1:-3]), 
+                      RT = unlist(d_orig[3,-1:-3]), 
+                      Q1 = unlist(d_orig[1,-1:-3]),
+                      Q3 = unlist(d_orig[2,-1:-3])
+                    )
+
+d_species <- d_species %>%
+  rename_with( ~ str_replace(.x, fixed("(-H20)"), "")) 
+
+d_species_annot <- d_species |> 
+  left_join(
+    d_long_final |> dplyr::select(species_name_original, species_name) |> distinct(), 
+    by = c("species_name_original"="species_name_original")
+  ) %>%
+  left_join(
+    d_goslin, 
+    by = c("species_name"="Original.Name")
+  )
+
+```
+
+As am example, how the additional information returned by rgoslin can be used, we plot the ECN vs the retention time. In reversed phase (RP), retention times of lipids increase with the total carbon number and decrease with the total double bond number. The Equivalent Carbon Number (ECN) is an established simple model for the prediction of retention times of lipids in RP [@triebl2017a].
+
+We first calculate to ECN based on the total C and DB number obtained from goslin. The formula is $ECN = C-k*DB$, whereby $k$ is 0.5 for the LC method used. Then we plot the ECN against the averaged retention times for each species. We observe a fairly linear, class-specific relationship between ECN and RT.
+
+```{r ecnplot}
+d_species_annot2 <- d_species_annot %>% 
+  mutate(ECN = Total.C - 1 * Total.DB)
+
+ggplot(d_species_annot2, aes(x = ECN,  y = RT, color = Functional.Class.Abbr)) +
+  geom_point(size= 2, alpha = 0.9) +
+  scale_color_brewer(palette="Dark2") + 
+   geom_smooth(method = "lm", formula = y ~ x, se = FALSE)
+
+```
+
+# References

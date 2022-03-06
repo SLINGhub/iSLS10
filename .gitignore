@@ -1,0 +1,12 @@
+*_cache/
+/cache/
+*.utf8.md
+*.knit.md
+.Renviron
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+**/output/*.pdf
+*.html
+*.docx
