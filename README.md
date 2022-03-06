@@ -1,10 +1,8 @@
-## iSLS10 Workshop Lipidomics Data Analysis
+# iSLS10 Workshop Lipidomics Data Analysis
 
-# Sphingolipids and T2DM Risk
+*Sphingolipids and T2DM Risk*
 
-## Manage, analyse and interpret lipidomics data using R
-
-Summary
+## Summary
 
 This repository contains datasets and R codes used for 9th International Singapore Lipid Symposium [iSLS10](https://sling.sg/news-events/isls/) workshop held Wednesday, March 9, 2022. We will be using the data published in *Chew et al., 2019, JCI Insight 5(13)* [10.1172/jci.insight.126925](https://doi.org/10.1172/jci.insight.126925) as an example dataset for this workshop.
 
@@ -12,11 +10,14 @@ In the first part, we will import and clean a lipidomics dataset and de-identifi
 
 In the second part, we will inspect the overall data trends in both sample meta data and lipidomics data via visualization. We will study the correlation structure between sphingolipids and other competing risk factors collected at baseline, and test associations of individual lipids with the risk of DM incidence, using logistic regression (binary outcome) and Cox regression analysis (time-to-event analysis). We will also explore options for multi-variable modelling, such as multi-variable Cox regression with group structured LASSO penalty and popular machine learning methods (e.g. random forest or boosting).
 
-## Download and run the R scripts
+## Download the R scripts
 
 Download the R Project containing the scripts and data used in this workshop from this repository.
+Alternatively you can clone this repository in RStudio/git.
 
-![](images/Screenshot%202022-03-05%20141709.png){width="312"}
+<img src="images/Screenshot 2022-03-05 141709.png" width="500"/>
+
+## Preparations to run the scripts
 
 Following R packages and external software should be installed on your R system before running the scripts (see also comments in the R scripts of Part 1 and 2):
 
