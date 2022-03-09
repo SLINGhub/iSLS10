@@ -165,7 +165,7 @@ d_plot <- d_plot %>% arrange(SampleType)
 
 ## Converting lipid species names to the updated LIPID MAPS nomenclature and retrieving lipid annotations
 
-LIPID MAPS has recently updated the lipid species nomenclature to a more comprehensive and standardized system [@liebisch2020]. There is an increasing number of publications adopting this new nomenclature. There is an online service to convert lipid names (<https://apps.lifs.isas.de/goslin/>). The software behind this tool [@Kopczynski2020] is also available in R ([rgoslin](https://github.com/lifs-tools/rgoslin)) and Python ([pygoslin](https://github.com/lifs-tools/pygoslin)).
+LIPID MAPS has recently updated the lipid species nomenclature to a more comprehensive and standardized system [@liebisch2020]. There is an increasing number of publications adopting this new nomenclature. There is an online service to convert lipid names (<https://apps.lifs-tools.org/goslin/>). The software behind this tool [@Kopczynski2020] is also available in R ([rgoslin](https://github.com/lifs-tools/rgoslin)) and Python ([pygoslin](https://github.com/lifs-tools/pygoslin)).
 
 Before we can convert lipid names in , we need to convert our lipid names into a more standardized format, for example: - MHCer and DCHer (correspond to the glucosylceramide and and lactosylceramide), need to be written as HexCer and Hex2Cer, respectively. Why...? - The C in front of the fatty acid chains need to be removed (e.g. C24:0 in Cer d18:1/C24:0), otherwise `rgoslin` does not recognize the lipid
 
